@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import copy
 import shlex
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -27,12 +30,163 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import ButtonBinding, SerialSettings, Settings, SliderBinding
+from ..config import (
+    BUTTON_HEIGHT_MM,
+    BUTTON_ROW1_TOP_MM,
+    BUTTON_SPACING_MM,
+    BUTTON_WIDTH_MM,
+    SLIDER_DISPLAY_WIDTH_MM,
+    SLIDER_HEIGHT_MM,
+    SLIDER_TOP_MM,
+    ButtonBinding,
+    default_buttons,
+    default_sliders,
+    SerialSettings,
+    Settings,
+    SliderBinding,
+)
 from ..hardware import available_serial_ports, serial_available
+from ..utils import format_key_sequence, join_key_sequence, order_tokens, split_key_sequence
+from .layout_preview import LayoutPreview
 
 
 SliderRow = Dict[str, object]
 ButtonRow = Dict[str, object]
+
+
+MODIFIER_KEYS = {
+    Qt.Key_Control: "ctrl",
+    Qt.Key_Shift: "shift",
+    Qt.Key_Alt: "alt",
+    Qt.Key_Meta: "win",
+}
+
+SPECIAL_KEYS = {
+    Qt.Key_Return: "enter",
+    Qt.Key_Enter: "enter",
+    Qt.Key_Tab: "tab",
+    Qt.Key_Backspace: "backspace",
+    Qt.Key_Delete: "delete",
+    Qt.Key_Escape: "escape",
+    Qt.Key_Space: "space",
+    Qt.Key_Insert: "insert",
+    Qt.Key_Home: "home",
+    Qt.Key_End: "end",
+    Qt.Key_PageUp: "pageup",
+    Qt.Key_PageDown: "pagedown",
+    Qt.Key_Left: "left",
+    Qt.Key_Right: "right",
+    Qt.Key_Up: "up",
+    Qt.Key_Down: "down",
+    Qt.Key_Print: "printscreen",
+    Qt.Key_Pause: "pause",
+    Qt.Key_CapsLock: "capslock",
+    Qt.Key_NumLock: "numlock",
+    Qt.Key_ScrollLock: "scrolllock",
+    Qt.Key_VolumeDown: "volumedown",
+    Qt.Key_VolumeUp: "volumeup",
+    Qt.Key_VolumeMute: "volumemute",
+}
+
+
+class KeySequenceEdit(QLineEdit):
+    """Line edit that can capture key combinations from the keyboard."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._tokens: List[str] = []
+        self._capture_enabled = False
+        self.setClearButtonEnabled(True)
+
+    # ------------------------------------------------------------------
+    def set_capture_enabled(self, enabled: bool) -> None:
+        self._capture_enabled = enabled
+        if enabled:
+            self.setPlaceholderText("Press keys and release to capture")
+        else:
+            self.setPlaceholderText("")
+
+    # ------------------------------------------------------------------
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
+        if not self._capture_enabled:
+            super().keyPressEvent(event)
+            return
+
+        if event.isAutoRepeat():
+            event.accept()
+            return
+
+        key = event.key()
+        if key in {Qt.Key_Backspace, Qt.Key_Delete} and not event.modifiers():
+            self.clear_sequence()
+            event.accept()
+            return
+
+        tokens = self._tokens_from_event(event)
+        if tokens:
+            self.set_sequence_tokens(tokens)
+        event.accept()
+
+    # ------------------------------------------------------------------
+    def _tokens_from_event(self, event: QKeyEvent) -> List[str]:
+        key = event.key()
+        if key in MODIFIER_KEYS:
+            return []
+
+        tokens: List[str] = []
+        modifiers = event.modifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            tokens.append("ctrl")
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            tokens.append("shift")
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            tokens.append("alt")
+        if modifiers & Qt.KeyboardModifier.MetaModifier:
+            tokens.append("win")
+
+        translated = self._translate_key(event)
+        if not translated:
+            return []
+        tokens.append(translated)
+        return order_tokens(tokens)
+
+    # ------------------------------------------------------------------
+    def _translate_key(self, event: QKeyEvent) -> str | None:
+        key = event.key()
+        if key in SPECIAL_KEYS:
+            return SPECIAL_KEYS[key]
+        if Qt.Key_F1 <= key <= Qt.Key_F35:
+            return f"f{key - Qt.Key_F1 + 1}"
+        text = event.text().strip()
+        if text:
+            return text.lower()
+        return None
+
+    # ------------------------------------------------------------------
+    def set_sequence_tokens(self, tokens: Iterable[str]) -> None:
+        ordered = order_tokens(tokens)
+        self._tokens = ordered
+        if ordered:
+            self.setText(format_key_sequence(ordered))
+        else:
+            self.clear()
+
+    def set_sequence_text(self, text: str) -> None:
+        tokens = split_key_sequence(text)
+        self.set_sequence_tokens(tokens)
+
+    def sequence_tokens(self) -> List[str]:
+        if self._tokens:
+            return list(self._tokens)
+        return split_key_sequence(self.text())
+
+    def sequence_text(self) -> str:
+        tokens = self.sequence_tokens()
+        return join_key_sequence(tokens)
+
+    def clear_sequence(self) -> None:
+        self._tokens.clear()
+        self.clear()
 
 
 SLIDER_ACTIONS = [
@@ -60,26 +214,73 @@ class ConfigurationDialog(QDialog):
         self._ensure_bindings()
         self._slider_rows: List[SliderRow] = []
         self._button_rows: List[ButtonRow] = []
+        self._slider_layout_rows: List[Dict[str, QDoubleSpinBox]] = []
+        self._button_layout_rows: List[Dict[str, QDoubleSpinBox]] = []
+        self._board_size_controls: Dict[str, QDoubleSpinBox] = {}
         self._port_box: QComboBox | None = None
         self._baud_spin: QSpinBox | None = None
         self._hardware_enable: QCheckBox | None = None
+        self._layout_preview: LayoutPreview | None = None
         self._build_ui()
 
     # ------------------------------------------------------------------
     def _ensure_bindings(self) -> None:
+        slider_defaults = default_sliders()
+        button_defaults = default_buttons()
+        for index, binding in enumerate(self._settings.sliders):
+            if binding.width_mm <= 0:
+                binding.width_mm = SLIDER_DISPLAY_WIDTH_MM
+            if binding.height_mm <= 0:
+                binding.height_mm = SLIDER_HEIGHT_MM
+            if binding.y_mm <= 0:
+                binding.y_mm = SLIDER_TOP_MM
+            if binding.x_mm <= 0 and index < len(slider_defaults):
+                binding.x_mm = slider_defaults[index].x_mm
         while len(self._settings.sliders) < 4:
             index = len(self._settings.sliders) + 1
+            default = slider_defaults[index - 1] if index - 1 < len(slider_defaults) else None
             self._settings.sliders.append(
                 SliderBinding(
                     id=f"slider{index}",
                     action_type="system_volume",
                     label=f"Slider {index}",
+                    x_mm=default.x_mm if default else SLIDER_DISPLAY_WIDTH_MM * index,
+                    y_mm=default.y_mm if default else SLIDER_TOP_MM,
+                    width_mm=SLIDER_DISPLAY_WIDTH_MM,
+                    height_mm=SLIDER_HEIGHT_MM,
                 )
             )
+        for index, binding in enumerate(self._settings.buttons):
+            if binding.width_mm <= 0:
+                binding.width_mm = BUTTON_WIDTH_MM
+            if binding.height_mm <= 0:
+                binding.height_mm = BUTTON_HEIGHT_MM
+            if binding.y_mm <= 0:
+                default_y = (
+                    BUTTON_ROW1_TOP_MM
+                    if index < 8
+                    else BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM
+                )
+                binding.y_mm = default_y
+            if binding.x_mm <= 0 and index < len(button_defaults):
+                binding.x_mm = button_defaults[index].x_mm
         while len(self._settings.buttons) < 16:
             index = len(self._settings.buttons)
             self._settings.buttons.append(
-                ButtonBinding(id=f"btn{index}", label=f"Button {index:02d}")
+                ButtonBinding(
+                    id=f"btn{index}",
+                    label=f"Button {index:02d}",
+                    x_mm=(
+                        button_defaults[index].x_mm
+                        if index < len(button_defaults)
+                        else index * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
+                    ),
+                    y_mm=(
+                        button_defaults[index].y_mm
+                        if index < len(button_defaults)
+                        else BUTTON_ROW1_TOP_MM
+                    ),
+                )
             )
 
     # ------------------------------------------------------------------
@@ -88,6 +289,7 @@ class ConfigurationDialog(QDialog):
         tabs = QTabWidget(self)
         tabs.addTab(self._create_sliders_tab(), "Sliders")
         tabs.addTab(self._create_buttons_tab(), "Buttons")
+        tabs.addTab(self._create_layout_tab(), "Layout")
         tabs.addTab(self._create_hardware_tab(), "Hardware")
         layout.addWidget(tabs)
 
@@ -200,7 +402,11 @@ class ConfigurationDialog(QDialog):
                 )
             )
 
-            target_edit = QLineEdit(binding.target or "", inner)
+            target_edit = KeySequenceEdit(inner)
+            if binding.action_type == "send_keystroke" and binding.target:
+                target_edit.set_sequence_text(binding.target)
+            else:
+                target_edit.setText(binding.target or "")
             target_edit.setPlaceholderText("Executable path / key combo")
 
             arguments_edit = QLineEdit(" ".join(binding.arguments), inner)
@@ -238,6 +444,138 @@ class ConfigurationDialog(QDialog):
             )
 
         outer.addWidget(scroll)
+        return container
+
+    # ------------------------------------------------------------------
+    def _create_layout_tab(self) -> QWidget:
+        container = QWidget(self)
+        outer = QVBoxLayout(container)
+        outer.setSpacing(12)
+
+        info = QLabel(
+            "Pas de fysieke posities van sliders en knoppen aan zodat het digitale"
+            " dashboard overeenkomt met je hardware layout.",
+            container,
+        )
+        info.setWordWrap(True)
+        outer.addWidget(info)
+
+        self._slider_layout_rows.clear()
+        self._button_layout_rows.clear()
+
+        preview = LayoutPreview(self._settings, container)
+        self._layout_preview = preview
+        outer.addWidget(preview, stretch=1)
+
+        board_group = QGroupBox("Dashboardafmetingen (mm)", container)
+        board_form = QFormLayout(board_group)
+        width_spin = self._create_mm_spin(
+            self._settings.layout.board_width_mm, minimum=100.0, maximum=2000.0
+        )
+        height_spin = self._create_mm_spin(
+            self._settings.layout.board_height_mm, minimum=100.0, maximum=800.0
+        )
+        width_spin.valueChanged.connect(
+            lambda value: self._on_board_dimension_changed("board_width_mm", value)
+        )
+        height_spin.valueChanged.connect(
+            lambda value: self._on_board_dimension_changed("board_height_mm", value)
+        )
+        self._board_size_controls = {"width": width_spin, "height": height_spin}
+        board_form.addRow("Breedte", width_spin)
+        board_form.addRow("Hoogte", height_spin)
+        outer.addWidget(board_group)
+
+        slider_group = QGroupBox("Sliderposities", container)
+        slider_grid = QGridLayout(slider_group)
+        slider_grid.addWidget(QLabel("Slider"), 0, 0)
+        slider_grid.addWidget(QLabel("X"), 0, 1)
+        slider_grid.addWidget(QLabel("Y"), 0, 2)
+        slider_grid.addWidget(QLabel("Breedte"), 0, 3)
+        slider_grid.addWidget(QLabel("Hoogte"), 0, 4)
+
+        for index, binding in enumerate(self._settings.sliders):
+            label = QLabel(f"Slider {index + 1}", slider_group)
+            x_spin = self._create_mm_spin(binding.x_mm)
+            y_spin = self._create_mm_spin(binding.y_mm)
+            width_spin = self._create_mm_spin(binding.width_mm, minimum=10.0)
+            height_spin = self._create_mm_spin(binding.height_mm, minimum=10.0)
+
+            x_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_slider_layout_changed(idx, "x_mm", value)
+            )
+            y_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_slider_layout_changed(idx, "y_mm", value)
+            )
+            width_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_slider_layout_changed(idx, "width_mm", value)
+            )
+            height_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_slider_layout_changed(idx, "height_mm", value)
+            )
+
+            slider_grid.addWidget(label, index + 1, 0)
+            slider_grid.addWidget(x_spin, index + 1, 1)
+            slider_grid.addWidget(y_spin, index + 1, 2)
+            slider_grid.addWidget(width_spin, index + 1, 3)
+            slider_grid.addWidget(height_spin, index + 1, 4)
+
+            self._slider_layout_rows.append(
+                {
+                    "x_mm": x_spin,
+                    "y_mm": y_spin,
+                    "width_mm": width_spin,
+                    "height_mm": height_spin,
+                }
+            )
+
+        outer.addWidget(slider_group)
+
+        button_group = QGroupBox("Knoppenposities", container)
+        button_grid = QGridLayout(button_group)
+        button_grid.addWidget(QLabel("Knop"), 0, 0)
+        button_grid.addWidget(QLabel("X"), 0, 1)
+        button_grid.addWidget(QLabel("Y"), 0, 2)
+        button_grid.addWidget(QLabel("Breedte"), 0, 3)
+        button_grid.addWidget(QLabel("Hoogte"), 0, 4)
+
+        for index, binding in enumerate(self._settings.buttons):
+            label = QLabel(f"Button {index:02d}", button_group)
+            x_spin = self._create_mm_spin(binding.x_mm)
+            y_spin = self._create_mm_spin(binding.y_mm)
+            width_spin = self._create_mm_spin(binding.width_mm, minimum=5.0)
+            height_spin = self._create_mm_spin(binding.height_mm, minimum=5.0)
+
+            x_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_button_layout_changed(idx, "x_mm", value)
+            )
+            y_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_button_layout_changed(idx, "y_mm", value)
+            )
+            width_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_button_layout_changed(idx, "width_mm", value)
+            )
+            height_spin.valueChanged.connect(
+                lambda value, idx=index: self._on_button_layout_changed(idx, "height_mm", value)
+            )
+
+            button_grid.addWidget(label, index + 1, 0)
+            button_grid.addWidget(x_spin, index + 1, 1)
+            button_grid.addWidget(y_spin, index + 1, 2)
+            button_grid.addWidget(width_spin, index + 1, 3)
+            button_grid.addWidget(height_spin, index + 1, 4)
+
+            self._button_layout_rows.append(
+                {
+                    "x_mm": x_spin,
+                    "y_mm": y_spin,
+                    "width_mm": width_spin,
+                    "height_mm": height_spin,
+                }
+            )
+
+        outer.addWidget(button_group)
+        outer.addStretch(1)
         return container
 
     # ------------------------------------------------------------------
@@ -322,6 +660,44 @@ class ConfigurationDialog(QDialog):
         if not arguments_enabled:
             arguments_edit.clear()
 
+        if isinstance(target_edit, KeySequenceEdit):
+            if action == "send_keystroke":
+                target_edit.set_capture_enabled(True)
+                if not target_edit.sequence_tokens():
+                    target_edit.setPlaceholderText("Press keys and release to capture")
+                arguments_edit.clear()
+            else:
+                target_edit.set_capture_enabled(False)
+                target_edit.setPlaceholderText("Executable path / key combo")
+
+    # ------------------------------------------------------------------
+    def _create_mm_spin(self, value: float, *, minimum: float = 0.0, maximum: float = 1200.0) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setDecimals(3)
+        spin.setSingleStep(1.0)
+        spin.setRange(minimum, maximum)
+        spin.setValue(float(value))
+        return spin
+
+    def _on_slider_layout_changed(self, index: int, field: str, value: float) -> None:
+        if 0 <= index < len(self._settings.sliders):
+            setattr(self._settings.sliders[index], field, float(value))
+            self._refresh_preview()
+
+    def _on_button_layout_changed(self, index: int, field: str, value: float) -> None:
+        if 0 <= index < len(self._settings.buttons):
+            setattr(self._settings.buttons[index], field, float(value))
+            self._refresh_preview()
+
+    def _on_board_dimension_changed(self, field: str, value: float) -> None:
+        if hasattr(self._settings.layout, field):
+            setattr(self._settings.layout, field, float(value))
+            self._refresh_preview()
+
+    def _refresh_preview(self) -> None:
+        if self._layout_preview is not None:
+            self._layout_preview.set_settings(self._settings)
+
     # ------------------------------------------------------------------
     def _choose_script(self, index: int) -> None:
         if index >= len(self._button_rows):
@@ -337,6 +713,7 @@ class ConfigurationDialog(QDialog):
         try:
             self._apply_slider_changes()
             self._apply_button_changes()
+            self._apply_layout_changes()
             self._apply_serial_changes()
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid configuration", str(exc))
@@ -355,29 +732,55 @@ class ConfigurationDialog(QDialog):
             target = target_edit.text().strip()
             binding.target = target or None
 
+            if index < len(self._slider_layout_rows):
+                layout_row = self._slider_layout_rows[index]
+                binding.x_mm = float(layout_row["x_mm"].value())
+                binding.y_mm = float(layout_row["y_mm"].value())
+                binding.width_mm = float(layout_row["width_mm"].value())
+                binding.height_mm = float(layout_row["height_mm"].value())
+
     def _apply_button_changes(self) -> None:
         for index, row in enumerate(self._button_rows):
             binding = self._settings.buttons[index]
             label_edit: QLineEdit = row["label"]  # type: ignore[assignment]
             action_combo: QComboBox = row["action"]  # type: ignore[assignment]
-            target_edit: QLineEdit = row["target"]  # type: ignore[assignment]
+            target_edit: KeySequenceEdit = row["target"]  # type: ignore[assignment]
             arguments_edit: QLineEdit = row["arguments"]  # type: ignore[assignment]
 
             binding.label = label_edit.text().strip() or None
             binding.action_type = action_combo.currentData()
-            target_text = target_edit.text().strip()
-            binding.target = target_text or None
-
-            arguments_text = arguments_edit.text().strip()
-            if arguments_text:
-                try:
-                    binding.arguments = shlex.split(arguments_text)
-                except ValueError as exc:  # pragma: no cover - validation path
-                    raise ValueError(
-                        f"Invalid arguments for button {index:02d}: {exc}"
-                    ) from exc
-            else:
+            if binding.action_type == "send_keystroke":
+                sequence_text = target_edit.sequence_text()
+                binding.target = sequence_text or None
                 binding.arguments = []
+            else:
+                target_text = target_edit.text().strip()
+                binding.target = target_text or None
+
+                arguments_text = arguments_edit.text().strip()
+                if binding.action_type == "run_script" and arguments_text:
+                    try:
+                        binding.arguments = shlex.split(arguments_text)
+                    except ValueError as exc:  # pragma: no cover - validation path
+                        raise ValueError(
+                            f"Invalid arguments for button {index:02d}: {exc}"
+                        ) from exc
+                else:
+                    binding.arguments = []
+
+            if index < len(self._button_layout_rows):
+                layout_row = self._button_layout_rows[index]
+                binding.x_mm = float(layout_row["x_mm"].value())
+                binding.y_mm = float(layout_row["y_mm"].value())
+                binding.width_mm = float(layout_row["width_mm"].value())
+                binding.height_mm = float(layout_row["height_mm"].value())
+
+    def _apply_layout_changes(self) -> None:
+        if not self._board_size_controls:
+            return
+        layout = self._settings.layout
+        layout.board_width_mm = float(self._board_size_controls["width"].value())
+        layout.board_height_mm = float(self._board_size_controls["height"].value())
 
     def _apply_serial_changes(self) -> None:
         if not self._port_box or not self._baud_spin or not self._hardware_enable:

@@ -9,8 +9,6 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
-    QGridLayout,
-    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -25,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..controller import DashboardController
 from .config_dialog import ConfigurationDialog
+from .canvas import DashboardCanvas
 
 
 class DashboardWindow(QMainWindow):
@@ -34,6 +33,7 @@ class DashboardWindow(QMainWindow):
         super().__init__()
         self.controller = controller
         self.setWindowTitle("Hardware Dashboard")
+        self.canvas: DashboardCanvas | None = None
         self._slider_widgets: List[QSlider] = []
         self._slider_labels: List[QLabel] = []
         self._slider_titles: List[QLabel] = []
@@ -48,62 +48,34 @@ class DashboardWindow(QMainWindow):
     def _setup_ui(self) -> None:
         central = QWidget(self)
         self.setCentralWidget(central)
-        layout = QHBoxLayout(central)
+        layout = QVBoxLayout(central)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(24)
+        layout.setSpacing(12)
 
-        slider_panel = QVBoxLayout()
-        slider_header = QLabel("Sliders")
-        slider_header.setProperty("section", True)
-        slider_panel.addWidget(slider_header)
-        slider_grid = QGridLayout()
-        slider_panel.addLayout(slider_grid)
+        self.canvas = DashboardCanvas(self.controller, central)
+        layout.addWidget(self.canvas, stretch=1)
 
-        for index in range(4):
-            value_label = QLabel("0%")
-            value_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            slider = QSlider(Qt.Orientation.Vertical)
-            slider.setRange(0, 100)
-            slider.setValue(self.controller.slider_percentages[index])
-            slider.setTickInterval(5)
-            slider.setTickPosition(QSlider.TickPosition.TicksRight)
+        caption = QLabel(
+            "Wijzig sliders en knoppen direct in deze lay-out of gebruik de configuratie"
+            " om acties en posities bij te werken.",
+            central,
+        )
+        caption.setWordWrap(True)
+        caption.setObjectName("layoutCaption")
+        layout.addWidget(caption)
+
+        self._slider_widgets = self.canvas.slider_widgets
+        self._slider_labels = self.canvas.slider_value_labels
+        self._slider_titles = self.canvas.slider_title_labels
+        self._button_widgets = self.canvas.button_widgets
+
+        for index, slider in enumerate(self._slider_widgets):
             slider.valueChanged.connect(partial(self._slider_changed, index))
             slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-            label_widget = QLabel(self.controller.slider_display_name(index))
-            label_widget.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-            column = index
-            slider_grid.addWidget(label_widget, 0, column)
-            slider_grid.addWidget(slider, 1, column)
-            slider_grid.addWidget(value_label, 2, column)
-
-            self._slider_widgets.append(slider)
-            self._slider_labels.append(value_label)
-            self._slider_titles.append(label_widget)
-
-        layout.addLayout(slider_panel, stretch=1)
-
-        button_panel = QVBoxLayout()
-        button_header = QLabel("Buttons")
-        button_header.setProperty("section", True)
-        button_panel.addWidget(button_header)
-        button_grid = QGridLayout()
-        button_panel.addLayout(button_grid)
-        button_grid.setSpacing(12)
-
-        for row in range(2):
-            for col in range(8):
-                index = row * 8 + col
-                button = QPushButton(self.controller.button_display_name(index))
-                button.setCheckable(True)
-                button.pressed.connect(partial(self._button_pressed, index))
-                button.released.connect(partial(self._button_released, index))
-                button.setMinimumHeight(60)
-                button_grid.addWidget(button, row, col)
-                self._button_widgets.append(button)
-
-        layout.addLayout(button_panel, stretch=2)
+        for index, button in enumerate(self._button_widgets):
+            button.pressed.connect(partial(self._button_pressed, index))
+            button.released.connect(partial(self._button_released, index))
 
         self._setup_toolbar()
         self._setup_statusbar()
@@ -207,10 +179,8 @@ class DashboardWindow(QMainWindow):
             button.setChecked(bool(state))
 
     def _refresh_binding_labels(self) -> None:
-        for idx, title in enumerate(self._slider_titles):
-            title.setText(self.controller.slider_display_name(idx))
-        for idx, button in enumerate(self._button_widgets):
-            button.setText(self.controller.button_display_name(idx))
+        if self.canvas:
+            self.canvas.update_bindings()
 
     def _update_statusbar(self) -> None:
         serial = self.controller.settings.serial
@@ -228,10 +198,12 @@ class DashboardWindow(QMainWindow):
                 background-color: #1f1f24;
                 color: #f5f5f5;
             }
-            QLabel[section="true"] {
-                font-size: 18px;
-                font-weight: 600;
-                margin-bottom: 8px;
+            DashboardCanvas {
+                border: none;
+            }
+            QLabel#layoutCaption {
+                color: #9aa0a6;
+                font-size: 13px;
             }
             QSlider::groove:vertical {
                 background: #3a3f47;

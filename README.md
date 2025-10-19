@@ -9,7 +9,7 @@
 - **Knoppen:**
   - 2 rijen van 8 knoppen (totaal 16)
   - Rij 1 (btn0–btn7) start op 0 mm van links en 46 mm van boven
-  - Rij 2 (btn8–btn15) start op 0 mm van links en 527,34 mm van boven
+  - Rij 2 (btn8–btn15) start op 0 mm van links en circa 70,67 mm van boven
   - Afmetingen: 14,07 mm × 14,07 mm
   - Afstand tussen knoppen: 10,6 mm
 - **Sliders:**
@@ -28,7 +28,7 @@
 
 ## Slider Functionaliteit
 - Toewijzing aan volumes van geïnstalleerde of actieve apps.
-- Mapping 0–1023 naar 0–100% via SoundVolumeView.exe.
+- Mapping 0–1023 naar 0–100% via de ingebouwde Windows CoreAudio API.
 - UI-sliderknoppen bewegen mee met hardware-input.
 
 ## Knoppen Functionaliteit
@@ -39,18 +39,20 @@
 - Knoppen lichten op bij rising edge-input van de hardware.
 
 ## Software Functionaliteit
-- UI volgt fysieke layout en schaalt met het scherm.
+- UI volgt de fysieke layout en schaalt met het scherm.
 - Hover-effect: gloed voor sliders en knoppen.
 - Instant search met lokale index en caching (Start Menu + Program Files).
 - Instellingen worden opgeslagen in JSON, automatisch geladen en kunnen worden gereset naar defaults.
-- Configuratiescherm in de app om sliders, knoppen en seriële instellingen aan te passen.
+- Configuratiescherm in de app om sliders, knoppen, seriële instellingen én fysieke posities aan te passen.
+- Nieuwe layout-tab met live preview zodat de digitale weergave exact overeenkomt met de behuizing.
 
 ## Extra Features
 - Toggle tussen hardware- en testmodus voor simulatie zonder fysieke hardware.
 - Realtime updates van sliders en knoppen via seriële data.
-- Volume- en appcontrole via hulpmiddelen zoals SoundVolumeView.exe.
+- Volume- en appcontrole via native Windows CoreAudio-aanroepen (geen externe tools meer nodig).
 - Automatische schermschaal voor optimale weergave.
-- In-app configuratiescherm voor sliders, knoppen en seriële instellingen (COM-poort en baudrate).
+- In-app configuratiescherm voor sliders, knoppen, seriële instellingen (COM-poort en baudrate) en layout.
+- Toetscombinaties kunnen direct in de UI worden opgenomen door de gewenste toetsen in te drukken, inclusief functie- en speciale toetsen.
 
 ---
 
@@ -96,8 +98,9 @@ Belangrijke opties:
 
 ## Volume-aansturing
 
-- De applicatie probeert automatisch `SoundVolumeView.exe` te vinden op het `PATH` of in dezelfde map als de app.
-- Als het bestand ontbreekt, wordt het volume niet aangepast maar blijft de rest van de app functioneren.
+- Op Windows gebruikt de app de CoreAudio API om systeem- en appvolumes rechtstreeks te wijzigen.
+- Bij app-specifieke sliders wordt gezocht naar een actieve audiosessie waarvan de procesnaam overeenkomt met de opgegeven hint (bijv. `chrome` of `chrome.exe`).
+- Op andere platformen wordt de volumewijziging gelogd maar niet uitgevoerd.
 
 ## Afhankelijkheden
 
@@ -118,6 +121,6 @@ Belangrijke opties:
 
 ## Bekende beperkingen
 
-- Voor volume-aanpassingen is Windows en SoundVolumeView nodig.
-- Voor toetscombinaties moet `pyautogui` beschikbaar zijn; anders wordt de actie gelogd.
+- Volume-aanpassing werkt alleen op Windows (CoreAudio). Op andere platforms wordt de wijziging alleen gelogd.
+- Voor toetscombinaties is Windows SendInput beschikbaar; anders wordt teruggevallen op `pyautogui` wanneer geïnstalleerd.
 - PySide6 vereist een werkende Qt-runtime; installeer systeemafhankelijkheden indien nodig.

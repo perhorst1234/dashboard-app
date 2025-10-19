@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from .keyboard import send_keystroke
+from .keyboard import send_keystroke_text
 from .launch import open_application, run_script
 from .volume import set_volume
 
@@ -17,7 +17,7 @@ def perform_button_action(action_type: str, target: Optional[str], arguments: It
     elif action_type == "run_script" and target:
         run_script(target, arguments)
     elif action_type == "send_keystroke" and target:
-        send_keystroke(target.split("+"))
+        send_keystroke_text(target)
 
 
 def perform_slider_action(action_type: str, target: Optional[str], value: int) -> None:

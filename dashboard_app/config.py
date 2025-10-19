@@ -8,6 +8,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
+
+BOARD_WIDTH_MM = 656.641
+BOARD_HEIGHT_MM = 180.0
+BUTTON_WIDTH_MM = 14.07
+BUTTON_HEIGHT_MM = 14.07
+BUTTON_SPACING_MM = 10.6
+BUTTON_ROW1_TOP_MM = 46.0
+SLIDER_TOP_MM = 56.981
+SLIDER_HEIGHT_MM = 65.0
+SLIDER_DISPLAY_WIDTH_MM = 32.0
+
 DEFAULT_CONFIG_NAME = "dashboard-settings.json"
 
 
@@ -23,6 +34,10 @@ class SliderBinding:
     action_type: SliderActionType = "system_volume"
     target: Optional[str] = None
     label: Optional[str] = None
+    x_mm: float = 0.0
+    y_mm: float = SLIDER_TOP_MM
+    width_mm: float = SLIDER_DISPLAY_WIDTH_MM
+    height_mm: float = SLIDER_HEIGHT_MM
 
 
 @dataclass
@@ -34,6 +49,18 @@ class ButtonBinding:
     target: Optional[str] = None
     arguments: List[str] = field(default_factory=list)
     label: Optional[str] = None
+    x_mm: float = 0.0
+    y_mm: float = BUTTON_ROW1_TOP_MM
+    width_mm: float = BUTTON_WIDTH_MM
+    height_mm: float = BUTTON_HEIGHT_MM
+
+
+@dataclass
+class LayoutSettings:
+    """Physical layout information for the dashboard canvas."""
+
+    board_width_mm: float = BOARD_WIDTH_MM
+    board_height_mm: float = BOARD_HEIGHT_MM
 
 
 @dataclass
@@ -52,23 +79,56 @@ class Settings:
     sliders: List[SliderBinding] = field(default_factory=list)
     buttons: List[ButtonBinding] = field(default_factory=list)
     serial: SerialSettings = field(default_factory=SerialSettings)
+    layout: LayoutSettings = field(default_factory=LayoutSettings)
 
     @staticmethod
     def default() -> "Settings":
         return Settings(
-            sliders=[
-                SliderBinding(
-                    id=f"slider{i}",
-                    action_type="system_volume",
-                    label=f"Slider {i}",
-                )
-                for i in range(1, 5)
-            ],
-            buttons=[
-                ButtonBinding(id=f"btn{i}", label=f"Button {i:02d}") for i in range(16)
-            ],
+            sliders=default_sliders(),
+            buttons=default_buttons(),
             serial=SerialSettings(),
+            layout=LayoutSettings(),
         )
+
+
+def default_sliders() -> List[SliderBinding]:
+    """Construct the default slider bindings including physical positions."""
+
+    slider_positions = [165.344, 205.852, 447.852, 489.296]
+    bindings: List[SliderBinding] = []
+    for index, x in enumerate(slider_positions, start=1):
+        bindings.append(
+            SliderBinding(
+                id=f"slider{index}",
+                action_type="system_volume",
+                label=f"Slider {index}",
+                x_mm=x,
+            )
+        )
+    return bindings
+
+
+def default_buttons() -> List[ButtonBinding]:
+    """Construct the default button bindings including layout positions."""
+
+    bindings: List[ButtonBinding] = []
+    row_y = [
+        BUTTON_ROW1_TOP_MM,
+        BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM,
+    ]
+    for row in range(2):
+        for col in range(8):
+            index = row * 8 + col
+            x = col * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
+            bindings.append(
+                ButtonBinding(
+                    id=f"btn{index}",
+                    label=f"Button {index:02d}",
+                    x_mm=x,
+                    y_mm=row_y[row],
+                )
+            )
+    return bindings
 
 
 class SettingsManager:
@@ -120,6 +180,10 @@ class SettingsManager:
                     "action_type": slider.action_type,
                     "target": slider.target,
                     "label": slider.label,
+                    "x_mm": slider.x_mm,
+                    "y_mm": slider.y_mm,
+                    "width_mm": slider.width_mm,
+                    "height_mm": slider.height_mm,
                 }
                 for slider in settings.sliders
             ],
@@ -130,9 +194,17 @@ class SettingsManager:
                     "target": button.target,
                     "arguments": button.arguments,
                     "label": button.label,
+                    "x_mm": button.x_mm,
+                    "y_mm": button.y_mm,
+                    "width_mm": button.width_mm,
+                    "height_mm": button.height_mm,
                 }
                 for button in settings.buttons
             ],
+            "layout": {
+                "board_width_mm": settings.layout.board_width_mm,
+                "board_height_mm": settings.layout.board_height_mm,
+            },
         }
 
     def _deserialize(self, data: Dict[str, Any]) -> Settings:
@@ -142,6 +214,10 @@ class SettingsManager:
                 action_type=item.get("action_type", "system_volume"),
                 target=item.get("target"),
                 label=item.get("label"),
+                x_mm=float(item.get("x_mm", 0.0)),
+                y_mm=float(item.get("y_mm", SLIDER_TOP_MM)),
+                width_mm=float(item.get("width_mm", SLIDER_DISPLAY_WIDTH_MM)),
+                height_mm=float(item.get("height_mm", SLIDER_HEIGHT_MM)),
             )
             for index, item in enumerate(data.get("sliders", []))
         ]
@@ -155,6 +231,17 @@ class SettingsManager:
                 target=item.get("target"),
                 arguments=list(item.get("arguments", [])),
                 label=item.get("label"),
+                x_mm=float(item.get("x_mm", 0.0)),
+                y_mm=float(
+                    item.get(
+                        "y_mm",
+                        BUTTON_ROW1_TOP_MM
+                        if index < 8
+                        else BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM,
+                    )
+                ),
+                width_mm=float(item.get("width_mm", BUTTON_WIDTH_MM)),
+                height_mm=float(item.get("height_mm", BUTTON_HEIGHT_MM)),
             )
             for index, item in enumerate(data.get("buttons", []))
         ]
@@ -168,4 +255,10 @@ class SettingsManager:
             enabled=bool(serial_data.get("enabled", False)),
         )
 
-        return Settings(sliders=sliders, buttons=buttons, serial=serial)
+        layout_data: Dict[str, Any] = data.get("layout", {})
+        layout = LayoutSettings(
+            board_width_mm=float(layout_data.get("board_width_mm", BOARD_WIDTH_MM)),
+            board_height_mm=float(layout_data.get("board_height_mm", BOARD_HEIGHT_MM)),
+        )
+
+        return Settings(sliders=sliders, buttons=buttons, serial=serial, layout=layout)

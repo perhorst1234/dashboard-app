@@ -8,6 +8,7 @@ from typing import List
 from .actions import perform_button_action, perform_slider_action
 from .config import ButtonBinding, Settings, SettingsManager, SliderBinding
 from .hardware import HardwareMessage, SerialReader, serial_available
+from .utils import format_key_sequence, split_key_sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -120,7 +121,8 @@ class DashboardController:
         if binding.action_type == "run_script" and binding.target:
             return f"Run {binding.target}"
         if binding.action_type == "send_keystroke" and binding.target:
-            return f"Keys: {binding.target}"
+            display = format_key_sequence(split_key_sequence(binding.target))
+            return f"Keys: {display}" if display else "Send Keys"
         return f"Button {index:02d}"
 
     def _disable_hardware(self) -> None:

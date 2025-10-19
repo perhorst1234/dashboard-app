@@ -1,68 +1,46 @@
-"""Volume control helpers."""
+"""Volume control helpers using Windows CoreAudio APIs."""
 
 from __future__ import annotations
 
 import logging
-import os
-import shutil
-import subprocess
-from pathlib import Path
+import sys
 from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
 
-SOUND_VOLUME_VIEW = "SoundVolumeView.exe"
-
-
-def _resolve_executable(custom_path: Optional[str] = None) -> Optional[str]:
-    if custom_path:
-        candidate = Path(custom_path)
-        if candidate.exists():
-            return str(candidate)
-    env_path = shutil.which(SOUND_VOLUME_VIEW)
-    if env_path:
-        return env_path
-
-    # Check alongside the application binary
-    local_candidate = Path.cwd() / SOUND_VOLUME_VIEW
-    if local_candidate.exists():
-        return str(local_candidate)
-
-    return None
+if sys.platform == "win32":  # pragma: no cover - platform specific
+    try:
+        from ..windows.audio import set_application_volume as _set_app_volume
+        from ..windows.audio import set_master_volume as _set_master_volume
+    except Exception:  # pragma: no cover - import guard
+        _set_app_volume = None  # type: ignore
+        _set_master_volume = None  # type: ignore
+else:  # pragma: no cover - platform specific
+    _set_app_volume = None  # type: ignore
+    _set_master_volume = None  # type: ignore
 
 
 def set_volume(target: Optional[str], percentage: int, *, executable: Optional[str] = None) -> None:
-    """Adjusts the volume using the SoundVolumeView utility.
+    """Adjust the system or application volume using native Windows APIs."""
 
-    Parameters
-    ----------
-    target:
-        Name of the device or application session to control. If ``None`` the
-        system master volume is targeted.
-    percentage:
-        Desired volume level between 0 and 100.
-    executable:
-        Optional explicit path to ``SoundVolumeView.exe``.
-    """
-
+    _ = executable  # maintained for backwards compatibility
     percentage = max(0, min(percentage, 100))
-    command = _resolve_executable(executable)
-    if not command:
-        LOGGER.info(
-            "SoundVolumeView.exe is not available – skipping volume change for %s", target
-        )
+
+    if _set_master_volume is None:
+        LOGGER.info("Volume control is only available on Windows; skipping volume change")
         return
 
-    args = [command]
     if target:
-        args.extend(["/SetAppVolume", target, str(percentage)])
+        try:
+            if not _set_app_volume(target, percentage):  # type: ignore[misc]
+                LOGGER.info("Geen actieve audio sessie gevonden voor %s", target)
+        except OSError:
+            LOGGER.exception("Kon het volume voor %s niet aanpassen", target)
     else:
-        args.extend(["/SetVolume", str(percentage)])
-
-    try:
-        subprocess.run(args, check=False)
-    except OSError:
-        LOGGER.exception("Failed to launch SoundVolumeView.exe")
+        try:
+            _set_master_volume(percentage)  # type: ignore[misc]
+        except OSError:
+            LOGGER.exception("Kon het systeemaudio-volume niet aanpassen")
 
 
 __all__ = ["set_volume"]
