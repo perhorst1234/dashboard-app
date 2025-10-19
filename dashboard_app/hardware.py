@@ -10,8 +10,10 @@ from typing import Iterable, Optional
 
 try:
     import serial  # type: ignore
+    from serial.tools import list_ports  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
     serial = None  # type: ignore
+    list_ports = None  # type: ignore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,5 +96,18 @@ def serial_available() -> bool:
     return serial is not None
 
 
-__all__ = ["HardwareMessage", "SerialReader", "serial_available"]
+def available_serial_ports() -> list[str]:
+    """Return a list of available serial port names."""
+
+    if list_ports is None:
+        return []
+    return [port.device for port in list_ports.comports()]
+
+
+__all__ = [
+    "HardwareMessage",
+    "SerialReader",
+    "available_serial_ports",
+    "serial_available",
+]
 

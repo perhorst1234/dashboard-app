@@ -22,6 +22,7 @@ class SliderBinding:
     id: str
     action_type: SliderActionType = "system_volume"
     target: Optional[str] = None
+    label: Optional[str] = None
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ButtonBinding:
     action_type: ButtonActionType = "noop"
     target: Optional[str] = None
     arguments: List[str] = field(default_factory=list)
+    label: Optional[str] = None
 
 
 @dataclass
@@ -55,10 +57,16 @@ class Settings:
     def default() -> "Settings":
         return Settings(
             sliders=[
-                SliderBinding(id=f"slider{i}", action_type="system_volume")
+                SliderBinding(
+                    id=f"slider{i}",
+                    action_type="system_volume",
+                    label=f"Slider {i}",
+                )
                 for i in range(1, 5)
             ],
-            buttons=[ButtonBinding(id=f"btn{i}") for i in range(16)],
+            buttons=[
+                ButtonBinding(id=f"btn{i}", label=f"Button {i:02d}") for i in range(16)
+            ],
             serial=SerialSettings(),
         )
 
@@ -111,6 +119,7 @@ class SettingsManager:
                     "id": slider.id,
                     "action_type": slider.action_type,
                     "target": slider.target,
+                    "label": slider.label,
                 }
                 for slider in settings.sliders
             ],
@@ -120,6 +129,7 @@ class SettingsManager:
                     "action_type": button.action_type,
                     "target": button.target,
                     "arguments": button.arguments,
+                    "label": button.label,
                 }
                 for button in settings.buttons
             ],
@@ -131,6 +141,7 @@ class SettingsManager:
                 id=item.get("id", f"slider{index+1}"),
                 action_type=item.get("action_type", "system_volume"),
                 target=item.get("target"),
+                label=item.get("label"),
             )
             for index, item in enumerate(data.get("sliders", []))
         ]
@@ -143,6 +154,7 @@ class SettingsManager:
                 action_type=item.get("action_type", "noop"),
                 target=item.get("target"),
                 arguments=list(item.get("arguments", [])),
+                label=item.get("label"),
             )
             for index, item in enumerate(data.get("buttons", []))
         ]

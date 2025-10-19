@@ -43,12 +43,14 @@
 - Hover-effect: gloed voor sliders en knoppen.
 - Instant search met lokale index en caching (Start Menu + Program Files).
 - Instellingen worden opgeslagen in JSON, automatisch geladen en kunnen worden gereset naar defaults.
+- Configuratiescherm in de app om sliders, knoppen en seriële instellingen aan te passen.
 
 ## Extra Features
 - Toggle tussen hardware- en testmodus voor simulatie zonder fysieke hardware.
 - Realtime updates van sliders en knoppen via seriële data.
 - Volume- en appcontrole via hulpmiddelen zoals SoundVolumeView.exe.
 - Automatische schermschaal voor optimale weergave.
+- In-app configuratiescherm voor sliders, knoppen en seriële instellingen (COM-poort en baudrate).
 
 ---
 
@@ -89,6 +91,7 @@ Belangrijke opties:
 
 - Activeer hardwaremodus via de werkbalk of startopties.
 - De app probeert `pyserial` te gebruiken om seriële data te lezen en de UI synchroon te houden met het fysieke dashboard.
+- Gebruik het configuratiescherm (werkbalk → "Configure Dashboard") om COM-poort en baudrate te selecteren of hardwaremodus in/uit te schakelen.
 - Elk ontvangen hardwarepakket update sliders (0–1023 → 0–100%) en vuurt bij rising edges de bijbehorende knopactie.
 
 ## Volume-aansturing
@@ -111,6 +114,7 @@ Belangrijke opties:
   - `hardware.py`: seriële leesthread en payloadparser.
   - `actions/`: implementatie van volume-, script- en toetsacties.
   - `ui/main_window.py`: Qt-interface met sliders, knoppen en modusknoppen.
+  - `ui/config_dialog.py`: dialoog om slider-/knopacties en seriële verbinding te configureren.
 
 ## Bekende beperkingen
 

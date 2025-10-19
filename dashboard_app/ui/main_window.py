@@ -8,6 +8,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -23,13 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..controller import DashboardController
-
-
-BUTTON_LABELS = [
-    f"BTN {i:02d}" for i in range(16)
-]
-
-SLIDER_LABELS = [f"Slider {i+1}" for i in range(4)]
+from .config_dialog import ConfigurationDialog
 
 
 class DashboardWindow(QMainWindow):
@@ -41,6 +36,7 @@ class DashboardWindow(QMainWindow):
         self.setWindowTitle("Hardware Dashboard")
         self._slider_widgets: List[QSlider] = []
         self._slider_labels: List[QLabel] = []
+        self._slider_titles: List[QLabel] = []
         self._button_widgets: List[QPushButton] = []
         self._hardware_timer = QTimer(self)
         self._hardware_timer.setInterval(100)
@@ -53,13 +49,17 @@ class DashboardWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(24)
 
         slider_panel = QVBoxLayout()
-        slider_panel.addWidget(QLabel("Sliders"))
+        slider_header = QLabel("Sliders")
+        slider_header.setProperty("section", True)
+        slider_panel.addWidget(slider_header)
         slider_grid = QGridLayout()
         slider_panel.addLayout(slider_grid)
 
-        for index, label in enumerate(SLIDER_LABELS):
+        for index in range(4):
             value_label = QLabel("0%")
             value_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             slider = QSlider(Qt.Orientation.Vertical)
@@ -70,7 +70,7 @@ class DashboardWindow(QMainWindow):
             slider.valueChanged.connect(partial(self._slider_changed, index))
             slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-            label_widget = QLabel(label)
+            label_widget = QLabel(self.controller.slider_display_name(index))
             label_widget.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
             column = index
@@ -80,18 +80,22 @@ class DashboardWindow(QMainWindow):
 
             self._slider_widgets.append(slider)
             self._slider_labels.append(value_label)
+            self._slider_titles.append(label_widget)
 
         layout.addLayout(slider_panel, stretch=1)
 
         button_panel = QVBoxLayout()
-        button_panel.addWidget(QLabel("Buttons"))
+        button_header = QLabel("Buttons")
+        button_header.setProperty("section", True)
+        button_panel.addWidget(button_header)
         button_grid = QGridLayout()
         button_panel.addLayout(button_grid)
+        button_grid.setSpacing(12)
 
         for row in range(2):
             for col in range(8):
                 index = row * 8 + col
-                button = QPushButton(BUTTON_LABELS[index])
+                button = QPushButton(self.controller.button_display_name(index))
                 button.setCheckable(True)
                 button.pressed.connect(partial(self._button_pressed, index))
                 button.released.connect(partial(self._button_released, index))
@@ -103,6 +107,8 @@ class DashboardWindow(QMainWindow):
 
         self._setup_toolbar()
         self._setup_statusbar()
+        self._apply_styles()
+        self._refresh_binding_labels()
         self._update_mode_indicator()
         self._refresh_ui()
 
@@ -120,11 +126,16 @@ class DashboardWindow(QMainWindow):
         save_action.triggered.connect(self._save_settings)
         toolbar.addAction(save_action)
 
+        configure_action = QAction("Configure Dashboard", self)
+        configure_action.triggered.connect(self._open_configuration)
+        toolbar.addAction(configure_action)
+
     def _setup_statusbar(self) -> None:
         status = QStatusBar(self)
         self.setStatusBar(status)
         self._mode_label = QLabel()
         status.addPermanentWidget(self._mode_label)
+        self._update_statusbar()
 
     # ------------------------------------------------------------------
     def _toggle_mode(self) -> None:
@@ -148,6 +159,7 @@ class DashboardWindow(QMainWindow):
         else:
             self._toggle_mode_action.setText("Switch to Test")
         self._mode_label.setText(f"Mode: {self.controller.mode.title()}")
+        self._update_statusbar()
 
     # ------------------------------------------------------------------
     def _slider_changed(self, index: int, value: int) -> None:
@@ -193,6 +205,77 @@ class DashboardWindow(QMainWindow):
         for idx, state in enumerate(self.controller.button_states):
             button = self._button_widgets[idx]
             button.setChecked(bool(state))
+
+    def _refresh_binding_labels(self) -> None:
+        for idx, title in enumerate(self._slider_titles):
+            title.setText(self.controller.slider_display_name(idx))
+        for idx, button in enumerate(self._button_widgets):
+            button.setText(self.controller.button_display_name(idx))
+
+    def _update_statusbar(self) -> None:
+        serial = self.controller.settings.serial
+        if serial.enabled and serial.port:
+            self.statusBar().showMessage(
+                f"Serial: {serial.port} @ {serial.baudrate} baud"
+            )
+        else:
+            self.statusBar().clearMessage()
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background-color: #1f1f24;
+                color: #f5f5f5;
+            }
+            QLabel[section="true"] {
+                font-size: 18px;
+                font-weight: 600;
+                margin-bottom: 8px;
+            }
+            QSlider::groove:vertical {
+                background: #3a3f47;
+                border-radius: 3px;
+                width: 8px;
+            }
+            QSlider::handle:vertical {
+                background: #1a73e8;
+                border-radius: 8px;
+                height: 20px;
+                margin: -4px;
+            }
+            QPushButton {
+                background-color: #2b2f36;
+                border: 1px solid #3d434c;
+                border-radius: 8px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                border-color: #5f9bff;
+            }
+            QPushButton:checked {
+                background-color: #1a73e8;
+                border-color: #1a73e8;
+            }
+            QToolBar {
+                background: #26262c;
+                spacing: 12px;
+                padding: 6px;
+            }
+            QStatusBar {
+                background: #26262c;
+            }
+            """
+        )
+
+    def _open_configuration(self) -> None:
+        dialog = ConfigurationDialog(self.controller.settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_settings = dialog.result_settings()
+            self.controller.apply_settings(new_settings)
+            self._refresh_binding_labels()
+            self._refresh_ui()
+            self._update_mode_indicator()
 
 
 def launch(controller: DashboardController) -> None:

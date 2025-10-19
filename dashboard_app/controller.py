@@ -6,7 +6,7 @@ import logging
 from typing import List
 
 from .actions import perform_button_action, perform_slider_action
-from .config import ButtonBinding, SettingsManager, SliderBinding
+from .config import ButtonBinding, Settings, SettingsManager, SliderBinding
 from .hardware import HardwareMessage, SerialReader, serial_available
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +33,34 @@ class DashboardController:
     def save_settings(self) -> None:
         self._settings_manager.settings = self.settings
         self._settings_manager.save()
+
+    def apply_settings(self, settings: Settings) -> None:
+        """Replace the current settings with ``settings`` and persist them."""
+
+        previous_serial = self.settings.serial
+        previous_mode = self.mode
+        self.settings = settings
+        self.save_settings()
+
+        if settings.serial.enabled:
+            self.mode = "hardware"
+            should_restart = (
+                previous_serial.port != settings.serial.port
+                or previous_serial.baudrate != settings.serial.baudrate
+                or not self._serial_reader
+            )
+            if should_restart and self._serial_reader:
+                self._disable_hardware()
+            if should_restart or previous_mode != "hardware" or not self._serial_reader:
+                self._enable_hardware()
+            else:
+                self.settings.serial.enabled = True
+                self.save_settings()
+        else:
+            self._disable_hardware()
+            self.mode = "test"
+            self.settings.serial.enabled = False
+            self.save_settings()
 
     # ------------------------------------------------------------------
     # Mode control
@@ -69,6 +97,31 @@ class DashboardController:
         self.save_settings()
         self._serial_reader = SerialReader(port, baudrate)
         self._serial_reader.start()
+
+    # ------------------------------------------------------------------
+    # Helpers for UI display
+    # ------------------------------------------------------------------
+    def slider_display_name(self, index: int) -> str:
+        binding = self._slider_binding(index)
+        if binding.label:
+            return binding.label
+        if binding.action_type == "app_volume" and binding.target:
+            return f"App Volume: {binding.target}"
+        if binding.action_type == "system_volume":
+            return "System Volume"
+        return f"Slider {index + 1}"
+
+    def button_display_name(self, index: int) -> str:
+        binding = self._button_binding(index)
+        if binding.label:
+            return binding.label
+        if binding.action_type == "open_app" and binding.target:
+            return f"Launch {binding.target}"
+        if binding.action_type == "run_script" and binding.target:
+            return f"Run {binding.target}"
+        if binding.action_type == "send_keystroke" and binding.target:
+            return f"Keys: {binding.target}"
+        return f"Button {index:02d}"
 
     def _disable_hardware(self) -> None:
         if self._serial_reader:
