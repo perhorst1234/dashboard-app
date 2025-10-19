@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import logging
-import sys
+import os
 from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
 
-if sys.platform == "win32":  # pragma: no cover - platform specific
+if os.name == "nt":  # pragma: no cover - platform specific
     try:
         from ..windows.audio import set_application_volume as _set_app_volume
         from ..windows.audio import set_master_volume as _set_master_volume
     except Exception:  # pragma: no cover - import guard
+        LOGGER.exception("Kon de Windows audio-backend niet initialiseren")
         _set_app_volume = None  # type: ignore
         _set_master_volume = None  # type: ignore
 else:  # pragma: no cover - platform specific
@@ -27,7 +28,9 @@ def set_volume(target: Optional[str], percentage: int, *, executable: Optional[s
     percentage = max(0, min(percentage, 100))
 
     if _set_master_volume is None:
-        LOGGER.info("Volume control is only available on Windows; skipping volume change")
+        LOGGER.warning(
+            "Volume control backend is niet beschikbaar; volumewijziging wordt overgeslagen"
+        )
         return
 
     if target:

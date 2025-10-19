@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
-import sys
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -13,7 +13,7 @@ from ctypes.wintypes import BOOL, DWORD, GUID, LPCWSTR, UINT
 
 LOGGER = logging.getLogger(__name__)
 
-if sys.platform != "win32":  # pragma: no cover - platform guard
+if os.name != "nt":  # pragma: no cover - platform guard
     raise ImportError("windows.audio is only available on Windows platforms")
 
 ole32 = ctypes.windll.ole32

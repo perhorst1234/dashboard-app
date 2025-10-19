@@ -15,6 +15,7 @@ BUTTON_WIDTH_MM = 14.07
 BUTTON_HEIGHT_MM = 14.07
 BUTTON_SPACING_MM = 10.6
 BUTTON_ROW1_TOP_MM = 46.0
+BUTTON_BANK_WIDTH_MM = BUTTON_WIDTH_MM * 8 + BUTTON_SPACING_MM * 7
 SLIDER_TOP_MM = 56.981
 SLIDER_HEIGHT_MM = 65.0
 SLIDER_DISPLAY_WIDTH_MM = 32.0
@@ -108,24 +109,56 @@ def default_sliders() -> List[SliderBinding]:
     return bindings
 
 
+def _right_bank_offset(board_width: float) -> float:
+    """Return the left offset for the right-hand button bank."""
+
+    return max(0.0, board_width - BUTTON_BANK_WIDTH_MM)
+
+
+def _migrate_button_positions(buttons: List[ButtonBinding], board_width: float) -> None:
+    """Shift the right-hand buttons if an older layout keeps them on the left."""
+
+    if len(buttons) < 16:
+        return
+
+    offset = _right_bank_offset(board_width)
+    if offset <= 0:
+        return
+
+    right_bank = buttons[8:16]
+    if not right_bank:
+        return
+
+    max_x = max(button.x_mm for button in right_bank)
+    if max_x >= offset - 1.0:
+        return
+
+    legacy_max = (8 - 1) * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
+    if max_x > legacy_max + 1.0:
+        return
+
+    for button in right_bank:
+        button.x_mm = offset + button.x_mm
+
+
 def default_buttons() -> List[ButtonBinding]:
     """Construct the default button bindings including layout positions."""
 
     bindings: List[ButtonBinding] = []
-    row_y = [
-        BUTTON_ROW1_TOP_MM,
-        BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM,
+    row_offsets = [
+        (0.0, BUTTON_ROW1_TOP_MM),
+        (_right_bank_offset(BOARD_WIDTH_MM), BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM),
     ]
-    for row in range(2):
+    for row, (base_x, base_y) in enumerate(row_offsets):
         for col in range(8):
             index = row * 8 + col
-            x = col * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
+            x = base_x + col * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
             bindings.append(
                 ButtonBinding(
                     id=f"btn{index}",
                     label=f"Button {index:02d}",
                     x_mm=x,
-                    y_mm=row_y[row],
+                    y_mm=base_y,
                 )
             )
     return bindings
@@ -208,6 +241,10 @@ class SettingsManager:
         }
 
     def _deserialize(self, data: Dict[str, Any]) -> Settings:
+        layout_data: Dict[str, Any] = data.get("layout", {})
+        board_width = float(layout_data.get("board_width_mm", BOARD_WIDTH_MM))
+        board_height = float(layout_data.get("board_height_mm", BOARD_HEIGHT_MM))
+
         sliders = [
             SliderBinding(
                 id=item.get("id", f"slider{index+1}"),
@@ -224,6 +261,18 @@ class SettingsManager:
         if not sliders:
             sliders = Settings.default().sliders
 
+        row_offsets = [
+            (0.0, BUTTON_ROW1_TOP_MM),
+            (_right_bank_offset(board_width), BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM),
+        ]
+
+        def _default_button_position(index: int) -> tuple[float, float]:
+            row = 0 if index < 8 else 1
+            col = index % 8
+            base_x, base_y = row_offsets[row]
+            x = base_x + col * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
+            return x, base_y
+
         buttons = [
             ButtonBinding(
                 id=item.get("id", f"btn{index}"),
@@ -231,15 +280,8 @@ class SettingsManager:
                 target=item.get("target"),
                 arguments=list(item.get("arguments", [])),
                 label=item.get("label"),
-                x_mm=float(item.get("x_mm", 0.0)),
-                y_mm=float(
-                    item.get(
-                        "y_mm",
-                        BUTTON_ROW1_TOP_MM
-                        if index < 8
-                        else BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM,
-                    )
-                ),
+                x_mm=float(item.get("x_mm", _default_button_position(index)[0])),
+                y_mm=float(item.get("y_mm", _default_button_position(index)[1])),
                 width_mm=float(item.get("width_mm", BUTTON_WIDTH_MM)),
                 height_mm=float(item.get("height_mm", BUTTON_HEIGHT_MM)),
             )
@@ -247,6 +289,8 @@ class SettingsManager:
         ]
         if not buttons:
             buttons = Settings.default().buttons
+        else:
+            _migrate_button_positions(buttons, board_width)
 
         serial_data: Dict[str, Any] = data.get("serial", {})
         serial = SerialSettings(
@@ -255,10 +299,9 @@ class SettingsManager:
             enabled=bool(serial_data.get("enabled", False)),
         )
 
-        layout_data: Dict[str, Any] = data.get("layout", {})
         layout = LayoutSettings(
-            board_width_mm=float(layout_data.get("board_width_mm", BOARD_WIDTH_MM)),
-            board_height_mm=float(layout_data.get("board_height_mm", BOARD_HEIGHT_MM)),
+            board_width_mm=board_width,
+            board_height_mm=board_height,
         )
 
         return Settings(sliders=sliders, buttons=buttons, serial=serial, layout=layout)
