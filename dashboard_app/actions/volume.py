@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import logging
-import os
-from typing import Optional
+import sys
+from typing import List, Optional
 
 LOGGER = logging.getLogger(__name__)
 
-if os.name == "nt":  # pragma: no cover - platform specific
+if sys.platform.startswith("win"):
     try:
-        from ..windows.audio import set_application_volume as _set_app_volume
-        from ..windows.audio import set_master_volume as _set_master_volume
+        from ..windows.audio import (  # type: ignore[attr-defined]
+            list_audio_sessions as _list_audio_sessions,
+            set_application_volume as _set_app_volume,
+            set_master_volume as _set_master_volume,
+        )
     except Exception:  # pragma: no cover - import guard
         LOGGER.exception("Kon de Windows audio-backend niet initialiseren")
         _set_app_volume = None  # type: ignore
         _set_master_volume = None  # type: ignore
+        _list_audio_sessions = None  # type: ignore
 else:  # pragma: no cover - platform specific
     _set_app_volume = None  # type: ignore
     _set_master_volume = None  # type: ignore
+    _list_audio_sessions = None  # type: ignore
 
 
 def set_volume(target: Optional[str], percentage: int, *, executable: Optional[str] = None) -> None:
@@ -46,4 +51,17 @@ def set_volume(target: Optional[str], percentage: int, *, executable: Optional[s
             LOGGER.exception("Kon het systeemaudio-volume niet aanpassen")
 
 
-__all__ = ["set_volume"]
+def available_audio_sessions() -> List[str]:
+    """Return the names of active audio sessions when available."""
+
+    if _list_audio_sessions is None:
+        return []
+
+    try:
+        return _list_audio_sessions()  # type: ignore[misc]
+    except OSError:
+        LOGGER.exception("Kon actieve audio-sessies niet ophalen")
+        return []
+
+
+__all__ = ["set_volume", "available_audio_sessions"]

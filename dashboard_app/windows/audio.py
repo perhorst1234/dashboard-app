@@ -6,7 +6,7 @@ import ctypes
 import logging
 import os
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, List, Set
 
 from ctypes import POINTER, byref, cast
 from ctypes.wintypes import BOOL, DWORD, GUID, LPCWSTR, UINT
@@ -198,6 +198,20 @@ def _match_process(target: str, process_name: str | None) -> bool:
     return target_norm in proc_norm
 
 
+def _session_process_name(session: ctypes.c_void_p) -> str | None:
+    try:
+        session_control = _query_interface(session, IID_IAudioSessionControl2)
+    except OSError:
+        return None
+    try:
+        pid = DWORD()
+        hr = _invoke(session_control, 14, ctypes.c_long, (POINTER(DWORD),), byref(pid))
+        _check_hresult(hr, "Failed to read session process id")
+        return _process_name_from_pid(pid.value)
+    finally:
+        _release(session_control)
+
+
 def _set_session_volume(session: ctypes.c_void_p, process_hint: str, level: float) -> bool:
     try:
         session_control = _query_interface(session, IID_IAudioSessionControl2)
@@ -262,4 +276,42 @@ def set_application_volume(process_hint: str, percent: int) -> bool:
     return matched
 
 
-__all__ = ["set_master_volume", "set_application_volume"]
+def list_audio_sessions() -> List[str]:
+    """Return the names of processes with active audio sessions."""
+
+    sessions: Set[str] = set()
+
+    with ComContext():
+        enumerator = _create_enumerator()
+        try:
+            device = _get_default_device(enumerator)
+            try:
+                session_manager = _activate(device, IID_IAudioSessionManager2)
+                try:
+                    session_enum = ctypes.c_void_p()
+                    hr = _invoke(
+                        session_manager,
+                        5,
+                        ctypes.c_long,
+                        (POINTER(ctypes.c_void_p),),
+                        byref(session_enum),
+                    )
+                    _check_hresult(hr, "Failed to obtain session enumerator")
+                    try:
+                        for session in _iter_sessions(session_enum):
+                            process_name = _session_process_name(session)
+                            if process_name:
+                                sessions.add(process_name)
+                    finally:
+                        _release(session_enum)
+                finally:
+                    _release(session_manager)
+            finally:
+                _release(device)
+        finally:
+            _release(enumerator)
+
+    return sorted(sessions, key=str.casefold)
+
+
+__all__ = ["set_master_volume", "set_application_volume", "list_audio_sessions"]

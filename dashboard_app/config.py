@@ -15,7 +15,8 @@ BUTTON_WIDTH_MM = 14.07
 BUTTON_HEIGHT_MM = 14.07
 BUTTON_SPACING_MM = 10.6
 BUTTON_ROW1_TOP_MM = 46.0
-BUTTON_BANK_WIDTH_MM = BUTTON_WIDTH_MM * 8 + BUTTON_SPACING_MM * 7
+BUTTON_COLUMN_MARGIN_MM = 25.0
+BUTTON_CLUSTER_WIDTH_MM = BUTTON_WIDTH_MM * 2 + BUTTON_SPACING_MM
 SLIDER_TOP_MM = 56.981
 SLIDER_HEIGHT_MM = 65.0
 SLIDER_DISPLAY_WIDTH_MM = 32.0
@@ -109,58 +110,88 @@ def default_sliders() -> List[SliderBinding]:
     return bindings
 
 
-def _right_bank_offset(board_width: float) -> float:
-    """Return the left offset for the right-hand button bank."""
+def _left_button_columns() -> List[float]:
+    """Return the column offsets for the left button bank."""
 
-    return max(0.0, board_width - BUTTON_BANK_WIDTH_MM)
+    return [
+        BUTTON_COLUMN_MARGIN_MM,
+        BUTTON_COLUMN_MARGIN_MM + BUTTON_WIDTH_MM + BUTTON_SPACING_MM,
+    ]
 
 
-def _migrate_button_positions(buttons: List[ButtonBinding], board_width: float) -> None:
-    """Shift the right-hand buttons if an older layout keeps them on the left."""
+def _right_button_columns(board_width: float) -> List[float]:
+    """Return the column offsets for the right button bank."""
+
+    start = max(0.0, board_width - BUTTON_COLUMN_MARGIN_MM - BUTTON_CLUSTER_WIDTH_MM)
+    return [
+        start,
+        start + BUTTON_WIDTH_MM + BUTTON_SPACING_MM,
+    ]
+
+
+def _button_rows() -> List[float]:
+    """Return the row offsets shared by both button banks."""
+
+    return [
+        BUTTON_ROW1_TOP_MM + index * (BUTTON_HEIGHT_MM + BUTTON_SPACING_MM)
+        for index in range(4)
+    ]
+
+
+def _apply_columnar_layout(buttons: List[ButtonBinding], board_width: float) -> None:
+    """Position the buttons into two vertical banks on the left and right."""
 
     if len(buttons) < 16:
         return
 
-    offset = _right_bank_offset(board_width)
-    if offset <= 0:
+    left_columns = _left_button_columns()
+    right_columns = _right_button_columns(board_width)
+    rows = _button_rows()
+
+    for index in range(8):
+        row = index // 2
+        column = index % 2
+        button = buttons[index]
+        button.x_mm = left_columns[column]
+        button.y_mm = rows[row]
+
+    for index in range(8):
+        row = index // 2
+        column = index % 2
+        button = buttons[8 + index]
+        button.x_mm = right_columns[column]
+        button.y_mm = rows[row]
+
+
+def _migrate_button_positions(buttons: List[ButtonBinding], board_width: float) -> None:
+    """Shift legacy two-row layouts into the new columnar arrangement."""
+
+    if len(buttons) < 16:
         return
 
-    right_bank = buttons[8:16]
-    if not right_bank:
+    row_values = {round(button.y_mm, 3) for button in buttons}
+    if len(row_values) != 2:
         return
 
-    max_x = max(button.x_mm for button in right_bank)
-    if max_x >= offset - 1.0:
+    row_gap = max(row_values) - min(row_values)
+    expected_gap = BUTTON_HEIGHT_MM + BUTTON_SPACING_MM
+    if abs(row_gap - expected_gap) > 1.0:
         return
 
-    legacy_max = (8 - 1) * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
-    if max_x > legacy_max + 1.0:
-        return
-
-    for button in right_bank:
-        button.x_mm = offset + button.x_mm
+    _apply_columnar_layout(buttons, board_width)
 
 
 def default_buttons() -> List[ButtonBinding]:
     """Construct the default button bindings including layout positions."""
 
-    bindings: List[ButtonBinding] = []
-    row_offsets = [
-        (0.0, BUTTON_ROW1_TOP_MM),
-        (_right_bank_offset(BOARD_WIDTH_MM), BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM),
+    bindings: List[ButtonBinding] = [
+        ButtonBinding(
+            id=f"btn{index}",
+            label=f"Button {index:02d}",
+        )
+        for index in range(16)
     ]
-    for row, (base_x, base_y) in enumerate(row_offsets):
-        for col in range(8):
-            index = row * 8 + col
-            x = base_x + col * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
-            bindings.append(
-                ButtonBinding(
-                    id=f"btn{index}",
-                    label=f"Button {index:02d}",
-                    x_mm=x,
-                    y_mm=base_y,
-                )
-            )
+    _apply_columnar_layout(bindings, BOARD_WIDTH_MM)
     return bindings
 
 
@@ -261,17 +292,18 @@ class SettingsManager:
         if not sliders:
             sliders = Settings.default().sliders
 
-        row_offsets = [
-            (0.0, BUTTON_ROW1_TOP_MM),
-            (_right_bank_offset(board_width), BUTTON_ROW1_TOP_MM + BUTTON_HEIGHT_MM + BUTTON_SPACING_MM),
-        ]
+        left_columns = _left_button_columns()
+        right_columns = _right_button_columns(board_width)
+        rows = _button_rows()
 
         def _default_button_position(index: int) -> tuple[float, float]:
-            row = 0 if index < 8 else 1
-            col = index % 8
-            base_x, base_y = row_offsets[row]
-            x = base_x + col * (BUTTON_WIDTH_MM + BUTTON_SPACING_MM)
-            return x, base_y
+            if index < 8:
+                row = index // 2
+                column = index % 2
+                return left_columns[column], rows[row]
+            row = (index - 8) // 2
+            column = (index - 8) % 2
+            return right_columns[column], rows[row]
 
         buttons = [
             ButtonBinding(

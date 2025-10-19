@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import shlex
+from functools import partial
 from typing import Dict, Iterable, List
 
 from PySide6.QtCore import Qt
@@ -21,15 +22,18 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from ..actions.volume import available_audio_sessions
 from ..config import (
     BUTTON_HEIGHT_MM,
     BUTTON_ROW1_TOP_MM,
@@ -338,14 +342,30 @@ class ConfigurationDialog(QDialog):
                 target_edit.setEnabled(False)
 
             action_combo.currentIndexChanged.connect(
-                lambda _, edit=target_edit, combo=action_combo: self._on_slider_action_changed(
-                    combo, edit
+                lambda _, edit=target_edit, combo=action_combo, picker=session_button: self._on_slider_action_changed(
+                    combo, edit, picker
+                )
+            )
+
+            session_button = QToolButton(row_widget)
+            session_button.setText("Actieve apps")
+            session_button.setPopupMode(QToolButton.InstantPopup)
+            session_button.setEnabled(binding.action_type == "app_volume")
+            session_menu = QMenu(session_button)
+            session_button.setMenu(session_menu)
+            session_menu.aboutToShow.connect(
+                partial(
+                    self._populate_audio_session_menu,
+                    session_menu,
+                    action_combo,
+                    target_edit,
                 )
             )
 
             row_layout.addWidget(label_edit, stretch=2)
             row_layout.addWidget(action_combo, stretch=1)
             row_layout.addWidget(target_edit, stretch=2)
+            row_layout.addWidget(session_button)
 
             form.addRow(f"Slider {index + 1}", row_widget)
             self._slider_rows.append(
@@ -353,6 +373,7 @@ class ConfigurationDialog(QDialog):
                     "label": label_edit,
                     "action": action_combo,
                     "target": target_edit,
+                    "picker": session_button,
                 }
             )
 
@@ -638,9 +659,37 @@ class ConfigurationDialog(QDialog):
         self._port_box.setCurrentText(current)
 
     # ------------------------------------------------------------------
-    def _on_slider_action_changed(self, combo: QComboBox, target_edit: QLineEdit) -> None:
+    def _on_slider_action_changed(
+        self, combo: QComboBox, target_edit: QLineEdit, picker: QToolButton | None = None
+    ) -> None:
         action = combo.currentData()
         target_edit.setEnabled(action == "app_volume")
+        if picker is not None:
+            picker.setEnabled(action == "app_volume")
+
+    # ------------------------------------------------------------------
+    def _populate_audio_session_menu(
+        self, menu: QMenu, combo: QComboBox, target_edit: QLineEdit
+    ) -> None:
+        menu.clear()
+
+        if combo.currentData() != "app_volume":
+            action = menu.addAction("Alleen beschikbaar voor app-volume sliders")
+            action.setEnabled(False)
+            return
+
+        sessions = available_audio_sessions()
+        if not sessions:
+            action = menu.addAction("Geen actieve audio-apps gevonden")
+            action.setEnabled(False)
+            return
+
+        menu.addAction("Doel wissen", target_edit.clear)
+        menu.addSeparator()
+
+        for name in sessions:
+            action = menu.addAction(name)
+            action.triggered.connect(partial(target_edit.setText, name))
 
     # ------------------------------------------------------------------
     def _update_button_row_state(self, row: ButtonRow) -> None:

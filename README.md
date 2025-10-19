@@ -7,11 +7,10 @@
 ## Fysieke Afmetingen
 - **Afmetingen behuizing:** 656,641 mm (l) × 180 mm (b)
 - **Knoppen:**
-  - 2 rijen van 8 knoppen (totaal 16)
-  - Rij 1 (btn0–btn7) start op 0 mm van links en 46 mm van boven
-  - Rij 2 (btn8–btn15) start op 0 mm van links en circa 70,67 mm van boven
+  - Twee verticale kolommen van vier knoppen aan weerszijden van de sliders (links btn0–btn7, rechts btn8–btn15)
+  - Bovenste rij begint 46 mm van de bovenzijde; iedere volgende rij ligt 24,67 mm lager (14,07 mm knop + 10,6 mm ruimte)
+  - Kolommen staan 25 mm uit de zijkant met 24,67 mm horizontale afstand tussen kolom 1 en 2
   - Afmetingen: 14,07 mm × 14,07 mm
-  - Afstand tussen knoppen: 10,6 mm
 - **Sliders:**
   - 4 schuifregelaars, 65 mm lang en 2 mm breed
   - Posities (linkerbovenhoek):
@@ -44,12 +43,13 @@
 - Instant search met lokale index en caching (Start Menu + Program Files).
 - Instellingen worden opgeslagen in JSON, automatisch geladen en kunnen worden gereset naar defaults.
 - Configuratiescherm in de app om sliders, knoppen, seriële instellingen én fysieke posities aan te passen.
+- Slider-tab bevat een knop **Actieve apps** die actuele Windows-audiosessies toont zodat je direct het juiste proces kunt kiezen voor volumekoppelingen.
 - Nieuwe layout-tab met live preview zodat de digitale weergave exact overeenkomt met de behuizing.
 
 ## Extra Features
 - Toggle tussen hardware- en testmodus voor simulatie zonder fysieke hardware.
 - Realtime updates van sliders en knoppen via seriële data.
-- Volume- en appcontrole via native Windows CoreAudio-aanroepen (geen externe tools meer nodig).
+- Volume- en appcontrole via native Windows CoreAudio-aanroepen (geen externe tools meer nodig) inclusief een live lijst van actieve audio-apps om snel targets te koppelen.
 - Automatische schermschaal voor optimale weergave.
 - In-app configuratiescherm voor sliders, knoppen, seriële instellingen (COM-poort en baudrate) en layout.
 - Toetscombinaties kunnen direct in de UI worden opgenomen door de gewenste toetsen in te drukken, inclusief functie- en speciale toetsen.
